@@ -1,7 +1,7 @@
 import pickle
 import os
 import streamlit as st
-from google_auth_oauthlib.flow import Flow
+from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 
@@ -31,7 +31,7 @@ def authenticate_google():
                         "redirect_uris": ["http://localhost"]
                     }
                 }
-                flow = Flow.from_client_config(client_config, SCOPES)
+                flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
                 creds = flow.run_local_server(port=0)
 
                 # トークンを保存
