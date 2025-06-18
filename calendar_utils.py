@@ -32,7 +32,7 @@ def authenticate_google():
                     }
                 }
                 flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
-                creds = flow.run_local_server(port=0)
+                creds = flow.run_console()  # run_local_server -> run_console に変更
 
                 # トークンを保存
                 with open(token_path, "wb") as token:
