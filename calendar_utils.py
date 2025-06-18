@@ -1,7 +1,7 @@
 import pickle
 import os
 import streamlit as st
-from google_auth_oauthlib.flow import InstalledAppFlow
+from google_auth_oauthlib.flow import Flow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 
@@ -28,15 +28,24 @@ def authenticate_google():
                         "client_secret": st.secrets["google"]["client_secret"],
                         "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                         "token_uri": "https://oauth2.googleapis.com/token",
-                        "redirect_uris": ["http://localhost"]
+                        "redirect_uris": ["urn:ietf:wg:oauth:2.0:oob"]  # コンソール認証用
                     }
                 }
-                flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
-                creds = flow.run_console()  # run_local_server -> run_console に変更
+                flow = Flow.from_client_config(client_config, SCOPES)
+                flow.redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
+                auth_url, _ = flow.authorization_url(prompt='consent')
 
-                # トークンを保存
-                with open(token_path, "wb") as token:
-                    pickle.dump(creds, token)
+                st.info("以下のURLをブラウザで開いて、表示されたコードをここに貼り付けてください：")
+                st.write(auth_url)
+                code = st.text_input("認証コードを貼り付けてください:")
+
+                if code:
+                    flow.fetch_token(code=code)
+                    creds = flow.credentials
+
+                    # トークンを保存
+                    with open(token_path, "wb") as token:
+                        pickle.dump(creds, token)
             except Exception as e:
                 st.error(f"Google認証に失敗しました: {e}")
                 return None
