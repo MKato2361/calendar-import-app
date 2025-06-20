@@ -1,22 +1,17 @@
 import pickle
 import os
 import streamlit as st
-import getpass
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
-
-SCOPES = ["https://www.googleapis.com/auth/calendar"]
+from config import SCOPES, TOKEN_PATH, TOKEN_DIR
 
 def authenticate_google():
     creds = None
-    user_id = getpass.getuser()
-    token_dir = "tokens"
-    os.makedirs(token_dir, exist_ok=True)
-    token_path = os.path.join(token_dir, f"token_{user_id}.pickle")
+    os.makedirs(TOKEN_DIR, exist_ok=True)
 
-    if os.path.exists(token_path):
-        with open(token_path, "rb") as token:
+    if os.path.exists(TOKEN_PATH):
+        with open(TOKEN_PATH, "rb") as token:
             creds = pickle.load(token)
 
     if not creds or not creds.valid:
@@ -35,7 +30,7 @@ def authenticate_google():
                 }
                 flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
                 creds = flow.run_local_server(port=0)
-                with open(token_path, "wb") as token:
+                with open(TOKEN_PATH, "wb") as token:
                     pickle.dump(creds, token)
             except Exception as e:
                 st.error(f"Google認証に失敗しました: {e}")

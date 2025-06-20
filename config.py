@@ -1,10 +1,10 @@
-# config.py
+import os
+import getpass
 
-# Google Calendar APIスコープ
-SCOPES = ['https://www.googleapis.com/auth/calendar']
+# Google Calendar API の認証スコープ
+SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
-# 認証トークンの保存場所
-TOKEN_PATH = 'token.pickle'
-
-# Googleクレデンシャルファイル
-CREDENTIALS_FILE = 'credentials.json'
+# 各ユーザーごとにトークンを保存するパス
+USER_ID = getpass.getuser()
+TOKEN_DIR = "tokens"
+TOKEN_PATH = os.path.join(TOKEN_DIR, f"token_{USER_ID}.pickle")
