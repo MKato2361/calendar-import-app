@@ -4,10 +4,9 @@ import streamlit as st
 from google_auth_oauthlib.flow import Flow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
-from datetime import datetime
+from datetime import datetime, timezone # timezoneをインポート
 
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
-# TOKEN_FILE は不要になります
 
 def authenticate_google():
     creds = None
@@ -40,12 +39,6 @@ def authenticate_google():
                         "client_secret": st.secrets["google"]["client_secret"],
                         "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                         "token_uri": "https://oauth2.googleapis.com/token",
-                        # Streamlit Cloudでの動作を考慮し、redirect_urisを空にするか、
-                        # Webアプリケーション用のredirect_urisを設定します。
-                        # この例では、Streamlit CloudでのOAuthフローを簡略化するため、
-                        # 認証URLを直接ユーザーに表示し、ユーザーがコードを貼り付ける方式を維持します。
-                        # もしWebアプリケーションのリダイレクトURIを使用する場合は、
-                        # Google Cloud Consoleで設定したURIをここに追加し、flow.fetch_token()も変更が必要です。
                         "redirect_uris": ["urn:ietf:wg:oauth:2.0:oob", "http://localhost"] # ローカルテスト用も含む
                     }
                 }
@@ -90,40 +83,85 @@ def delete_events_from_calendar(service, calendar_id, start_date: datetime, end_
     """
     # 期間の終了日を1日進めて、終了日を含むようにします
     # Google Calendar APIのtimeMaxは排他的なので、指定日の終わりまで含めるにはその日の終わりを指定
-    end_date_inclusive = end_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+    # タイムゾーン情報を付与 (ローカルタイムゾーンを想定し、システムデフォルトのタイムゾーンで解釈)
+    # 明示的にJST (UTC+9) として扱うか、タイムゾーンを考慮しないシンプルなISOフォーマットにするか選択
+    # ここでは、タイムゾーンを付与しないisoformat()にZを付与する形で、APIがUTCとして解釈するのを期待します。
+    # より厳密には、datetimeオブジェクトをタイムゾーンアウェアにしてからisoformat()する必要があります。
     
-    # ISO 8601形式に変換し、UTC時間として扱います
-    # StreamlitはデフォルトでUTCとしてISOフォーマットするため、Zを追加
-    time_min = start_date.isoformat() + 'Z'
-    time_max = end_date_inclusive.isoformat() + 'Z'
+    # イベント登録時にタイムゾーンを'Asia/Tokyo'に設定しているので、削除時も同様に扱います。
+    # pytzなどのライブラリを使用するとより正確ですが、ここでは標準ライブラリで対応します。
+    
+    # start_date, end_dateはStreamlitのdate_inputから来ているため、datetimeオブジェクトに変換時に時間部分が0:0:0になっている。
+    # そのため、正確な範囲をカバーするために以下のように変換する。
+
+    # イベントのstart/endがdatetimeの場合（時間指定イベント）
+    # API呼び出しのtimeMin/timeMaxはISO 8601形式でなければならない。
+    # 日本時間で指定された日付範囲をUTCに変換してAPIに渡す
+    
+    # 開始時刻（午前0時）と終了時刻（午後11時59分59秒999999）を日本時間で設定
+    start_dt_jst = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_dt_jst = end_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+
+    # タイムゾーン情報を持たないdatetimeオブジェクトをUTCに変換
+    # 実際のタイムゾーン変換はより複雑ですが、ここでは簡易的に9時間引くことでUTCに変換
+    # これは厳密ではありませんが、多くのケースで機能します。
+    # 正確なタイムゾーン変換には `pytz` ライブラリの利用が推奨されます。
+    # 参考: https://developers.google.com/calendar/api/v3/reference/events/list
+    
+    # タイムゾーンを考慮したISO形式の文字列を作成
+    # イベント登録時に'Asia/Tokyo'を使っているので、検索もそのタイムゾーンを考慮すべき
+    # しかし、listメソッドのtimeMin/timeMaxはRFC3339形式（UTC）を要求する
+    # なので、JSTのdatetimeをUTCのdatetimeに変換する必要がある
+    
+    # JSTのオフセット
+    JST_OFFSET = timedelta(hours=9)
+
+    # JSTのdatetimeオブジェクトをUTCに変換
+    time_min_utc = (start_dt_jst - JST_OFFSET).isoformat() + 'Z'
+    time_max_utc = (end_dt_jst - JST_OFFSET).isoformat() + 'Z'
+
+    st.write(f"検索期間 (UTC): {time_min_utc} から {time_max_utc}") # デバッグ用
 
     deleted_count = 0
     page_token = None
 
     with st.spinner(f"{start_date.strftime('%Y/%m/%d')}から{end_date.strftime('%Y/%m/%d')}までのイベントを検索中..."):
         while True:
-            events_result = service.events().list(
-                calendarId=calendar_id,
-                timeMin=time_min,
-                timeMax=time_max,
-                singleEvents=True,
-                orderBy='startTime',
-                pageToken=page_token
-            ).execute()
-            events = events_result.get('items', [])
+            try:
+                events_result = service.events().list(
+                    calendarId=calendar_id,
+                    timeMin=time_min_utc,
+                    timeMax=time_max_utc,
+                    singleEvents=True,
+                    orderBy='startTime',
+                    pageToken=page_token
+                    # showDeleted=False はデフォルトなので不要
+                    # status='confirmed' はデフォルトでconfirmedのみを返すため不要。
+                    # showHiddenEvents=True # 隠れたイベントも対象にする場合はコメント解除
+                ).execute()
+                events = events_result.get('items', [])
 
-            if not events:
-                break # イベントがなければループを終了
+                if not events:
+                    break # イベントがなければループを終了
 
-            for event in events:
-                try:
-                    service.events().delete(calendarId=calendar_id, eventId=event['id']).execute()
-                    deleted_count += 1
-                except Exception as e:
-                    st.warning(f"イベント '{event.get('summary', '不明なイベント')}' の削除に失敗しました: {e}")
-            
-            page_token = events_result.get('nextPageToken')
-            if not page_token:
-                break # 次のページがなければループを終了
+                for event in events:
+                    # デバッグ情報
+                    event_summary = event.get('summary', '不明なイベント')
+                    event_start = event['start'].get('dateTime', event['start'].get('date'))
+                    st.info(f"削除対象イベント: {event_summary} (開始: {event_start})")
+
+                    try:
+                        service.events().delete(calendarId=calendar_id, eventId=event['id']).execute()
+                        deleted_count += 1
+                        st.success(f"イベント '{event_summary}' を削除しました。")
+                    except Exception as e:
+                        st.warning(f"イベント '{event_summary}' の削除に失敗しました: {e}")
+                
+                page_token = events_result.get('nextPageToken')
+                if not page_token:
+                    break # 次のページがなければループを終了
+            except Exception as e:
+                st.error(f"イベントの検索中にエラーが発生しました: {e}")
+                break # エラーが発生したらループを終了
     
     return deleted_count
