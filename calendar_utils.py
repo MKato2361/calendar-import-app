@@ -1,27 +1,19 @@
 import pickle
 import os
 import streamlit as st
-import getpass
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
-from config import SCOPES
+
+SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
 def authenticate_google():
     creds = None
-
-    # ユーザーごとのトークン保存
-    user_id = getpass.getuser()
-    token_dir = "tokens"
-    os.makedirs(token_dir, exist_ok=True)
-    token_path = os.path.join(token_dir, f"token_{user_id}.pickle")
-
-    # すでにトークンがあれば読み込む
+    token_path = "token.pickle"
     if os.path.exists(token_path):
         with open(token_path, "rb") as token:
             creds = pickle.load(token)
 
-    # トークンがない or 期限切れの場合は新規認証
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
@@ -36,34 +28,20 @@ def authenticate_google():
                         "redirect_uris": ["http://localhost"]
                     }
                 }
-
-                # 認証フローの生成
                 flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
-                auth_url, _ = flow.authorization_url(prompt='consent')
-
-                # Streamlit 上に URL を表示
-                st.warning("以下のURLをブラウザで開いて、Googleアカウントで認証してください。")
-                st.code(auth_url, language='text')
-
-                # ユーザーから認証コードを入力してもらう
-                auth_code = st.text_input("上のURLで取得した認証コードを貼り付けてください")
-
-                if auth_code:
-                    flow.fetch_token(code=auth_code)
-                    creds = flow.credentials
-                    with open(token_path, "wb") as token:
-                        pickle.dump(creds, token)
+                creds = flow.run_console()
+                with open(token_path, "wb") as token:
+                    pickle.dump(creds, token)
             except Exception as e:
                 st.error(f"Google認証に失敗しました: {e}")
                 return None
-
     return creds
 
 def add_event_to_calendar(service, calendar_id, event_data):
     event = service.events().insert(calendarId=calendar_id, body=event_data).execute()
     return event.get("htmlLink")
 
-def delete_events_in_range(service, calendar_id, start_date, end_date, keyword=None):
+def delete_events_in_range(service, calendar_id, start_date, end_date):
     deleted = 0
     try:
         events_result = service.events().list(
@@ -75,8 +53,6 @@ def delete_events_in_range(service, calendar_id, start_date, end_date, keyword=N
         ).execute()
         events = events_result.get('items', [])
         for event in events:
-            if keyword and keyword not in event.get('summary', ''):
-                continue
             try:
                 service.events().delete(calendarId=calendar_id, eventId=event['id']).execute()
                 deleted += 1
