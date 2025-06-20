@@ -183,7 +183,7 @@ with tabs[2]:
                 # 「選択期間のイベントを削除する」ボタンが押されたら確認メッセージを表示
                 if st.button("選択期間のイベントを削除する", key="delete_events_button"):
                     st.warning(f"「{selected_calendar_name_del}」カレンダーから")
-                    st.warning(f"{delete_start_date.strftime('%Y年%m月%d日')}から{delete_end_date.strftime('%Y年%m%d日')}までの")
+                    st.warning(f"{delete_start_date.strftime('%Y年%m月%d日')}から{delete_end_date.strftime('%Y年%m月%d日')}までの")
                     st.warning("全てのイベントを削除します。この操作は元に戻せません。よろしいですか？")
                     st.session_state.show_delete_confirmation = True # 確認ダイアログを表示するフラグを立てる
 
