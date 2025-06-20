@@ -183,7 +183,7 @@ with tabs[2]:
                 # 「選択期間のイベントを削除する」ボタンが押されたら確認メッセージを表示
                 if st.button("選択期間のイベントを削除する", key="delete_events_button"):
                     st.warning(f"「{selected_calendar_name_del}」カレンダーから")
-                    st.warning(f"{delete_start_date.strftime('%Y年%m月%d日')}から{delete_end_date.strftime('%Y年%m月%d日')}までの")
+                    st.warning(f"{delete_start_date.strftime('%Y年%m月%d日')}から{delete_end_date.strftime('%Y年%m%d日')}までの")
                     st.warning("全てのイベントを削除します。この操作は元に戻せません。よろしいですか？")
                     st.session_state.show_delete_confirmation = True # 確認ダイアログを表示するフラグを立てる
 
@@ -192,17 +192,15 @@ with tabs[2]:
                     col1, col2 = st.columns(2)
                     with col1:
                         if st.button("はい、削除を実行します", key="confirm_delete_button_final"):
-                            with st.spinner("イベントを削除中..."):
-                                # ここで delete_events_from_calendar を呼び出す
-                                deleted_count = delete_events_from_calendar(
-                                    service_del, calendar_id_del, 
-                                    datetime.combine(delete_start_date, datetime.min.time()),
-                                    datetime.combine(delete_end_date, datetime.max.time()) # 日付の終わりまで含める
-                                )
-                                if deleted_count > 0:
-                                    st.success(f"✅ {deleted_count} 件のイベントが削除されました。")
-                                else:
-                                    st.info("指定された期間内に削除するイベントは見つかりませんでした。")
+                            # delete_events_from_calendar 関数内でスピナーとプログレスバーが処理されます
+                            deleted_count = delete_events_from_calendar(
+                                service_del, calendar_id_del, 
+                                datetime.combine(delete_start_date, datetime.min.time()),
+                                datetime.combine(delete_end_date, datetime.max.time()) # 日付の終わりまで含める
+                            )
+                            # delete_events_from_calendar 内で結果メッセージが表示されるため、
+                            # ここでは最終的なメッセージは不要です（二重表示になるため）。
+                            # もしここで表示したい場合は、delete_events_from_calendar からの st.info/success を削除してください。
                             st.session_state.show_delete_confirmation = False # 削除処理後、フラグをリセット
                             st.rerun() # 画面をリフレッシュしてメッセージを更新
                     with col2:
