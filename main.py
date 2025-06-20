@@ -44,29 +44,48 @@ with tabs[1]:
 
         if st.button("📤 Googleカレンダーに登録する"):
             df = process_excel_files(uploaded_files, description_cols, st.session_state.allday, st.session_state.private)
-            success = 0
-            for _, row in df.iterrows():
-                try:
-                    event = {
-                        "summary": row["Subject"],
-                        "location": row["Location"],
-                        "description": row["Description"],
-                        "start": {},
-                        "end": {},
-                        "transparency": "transparent" if row["Private"] == "True" else "opaque",
-                    }
-                    if row["All Day Event"] == "True":
-                        event["start"] = {"date": row["Start Date"].replace("/", "-")}
-                        end_date = datetime.datetime.strptime(row["End Date"], "%Y/%m/%d") + datetime.timedelta(days=1)
-                        event["end"] = {"date": end_date.strftime("%Y-%m-%d")}
-                    else:
-                        event["start"] = {"dateTime": row["Start Date"] + "T" + row["Start Time"] + ":00", "timeZone": "Asia/Tokyo"}
-                        event["end"] = {"dateTime": row["End Date"] + "T" + row["End Time"] + ":00", "timeZone": "Asia/Tokyo"}
-                    add_event_to_calendar(service, calendar_id, event)
-                    success += 1
-                except Exception as e:
-                    st.error(f"{row['Subject']} の登録に失敗しました: {e}")
-            st.success(f"{success} 件のイベントを登録しました。")
+            if df.empty:
+                st.warning("有効なイベントデータがありません。ファイルの内容と日付を確認してください。")
+            else:
+                success = 0
+                skipped = 0
+                for _, row in df.iterrows():
+                    try:
+                        # 日付バリデーション
+                        if pd.isna(row["Start Date"]) or pd.isna(row["End Date"]):
+                            st.warning(f"{row['Subject']} は日付が無効なためスキップしました。")
+                            skipped += 1
+                            continue
+
+                        event = {
+                            "summary": row["Subject"],
+                            "location": row["Location"],
+                            "description": row["Description"],
+                            "start": {},
+                            "end": {},
+                            "transparency": "transparent" if row["Private"] == "True" else "opaque",
+                        }
+                        if row["All Day Event"] == "True":
+                            event["start"] = {"date": row["Start Date"].replace("/", "-")}
+                            end_date = datetime.datetime.strptime(row["End Date"], "%Y/%m/%d") + datetime.timedelta(days=1)
+                            event["end"] = {"date": end_date.strftime("%Y-%m-%d")}
+                        else:
+                            event["start"] = {
+                                "dateTime": row["Start Date"] + "T" + row["Start Time"] + ":00",
+                                "timeZone": "Asia/Tokyo",
+                            }
+                            event["end"] = {
+                                "dateTime": row["End Date"] + "T" + row["End Time"] + ":00",
+                                "timeZone": "Asia/Tokyo",
+                            }
+
+                        add_event_to_calendar(service, calendar_id, event)
+                        success += 1
+                    except Exception as e:
+                        st.error(f"{row['Subject']} の登録に失敗しました: {e}")
+                        skipped += 1
+
+                st.success(f"✅ {success} 件のイベントを登録しました。⏭ {skipped} 件はスキップまたは失敗しました。")
 
 # タブ③: イベントの削除
 with tabs[2]:
