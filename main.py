@@ -1,24 +1,24 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from excel_parser import process_excel_files
-from calendar_utils import authenticate_google, add_event_to_calendar
-from config import SCOPES # SCOPESはconfigから読み込まれますが、calendar_utilsでも定義しているので注意
+from calendar_utils import authenticate_google, add_event_to_calendar, delete_events_from_calendar
 from googleapiclient.discovery import build
 
-st.set_page_config(page_title="Googleカレンダー登録ツール", layout="wide")
-st.title("📅 Googleカレンダー一括イベント登録")
+st.set_page_config(page_title="Googleカレンダー登録・削除ツール", layout="wide")
+st.title("📅 Googleカレンダー一括イベント登録・削除")
 
-# ファイルアップロード
-tabs = st.tabs(["1. ファイルのアップロード", "2. イベントの設定・登録"])
+# ファイルアップロードとイベント設定、イベント削除のタブを作成
+tabs = st.tabs(["1. ファイルのアップロード", "2. イベントの登録", "3. イベントの削除"])
+
 with tabs[0]:
+    st.header("ファイルをアップロード")
     uploaded_files = st.file_uploader("Excelファイルを選択（複数可）", type=["xlsx"], accept_multiple_files=True)
 
     description_columns_pool = set()
     if uploaded_files:
         for file in uploaded_files:
             try:
-                # ファイルがアップロードされたら、その都度カラムプールを更新
                 df_temp = pd.read_excel(file, engine="openpyxl")
                 df_temp.columns = [str(c).strip() for c in df_temp.columns]
                 description_columns_pool.update(df_temp.columns)
@@ -26,29 +26,24 @@ with tabs[0]:
                 st.warning(f"{file.name} の読み込みに失敗しました: {e}")
         # セッションステートにdescription_columns_poolを保存
         st.session_state['description_columns_pool'] = list(description_columns_pool)
+        # アップロードされたファイルをセッションステートに保存（ファイルオブジェクト自体は永続化できないので注意）
+        # process_excel_filesがファイルオブジェクトを直接受け取るため、この形を維持
+        st.session_state['uploaded_files'] = uploaded_files 
     elif 'description_columns_pool' not in st.session_state:
         st.session_state['description_columns_pool'] = [] # 初期化
+    
+    # 以前アップロードされたファイルがあればそれを表示
+    if st.session_state.get('uploaded_files'):
+        st.subheader("アップロード済みのファイル:")
+        for f in st.session_state['uploaded_files']:
+            st.write(f"- {f.name}")
+
 
 with tabs[1]:
-    # uploaded_filesはtabs[0]で設定されるため、tabs[1]で利用可能
-    # ただし、Streamlitの再実行で値がリセットされる可能性があるため、session_stateに入れるのがより堅牢
-    if 'uploaded_files_data' not in st.session_state:
-        st.session_state['uploaded_files_data'] = []
-
-    if uploaded_files:
-        # アップロードされたファイルをセッションステートに保存（ファイルの実体ではなく、必要な情報のみ）
-        # ただし、ファイルオブジェクト自体をセッションステートに保存するとエラーになる可能性があるので注意
-        # ここではファイルの内容を処理する `process_excel_files` がファイルオブジェクトを受け取るため、
-        # `uploaded_files` を直接使う。ただし、実際のファイルパスなどが必要な場合は工夫が必要。
-        pass
-    else:
-        # ファイルがアップロードされていない場合は、以前のセッションステートから取得を試みる
-        # 今回のロジックでは、ファイルアップローダーが常に最新のuploaded_filesを返すため、
-        # この部分は直接uploaded_filesを参照する形でも問題ないことが多い
-        if not st.session_state.get('uploaded_files_data'): # uploaded_files_dataが空なら停止
-            st.info("先にExcelファイルをアップロードしてください。")
-            st.stop()
-
+    st.header("イベントを登録")
+    if not st.session_state.get('uploaded_files'):
+        st.info("先に「1. ファイルのアップロード」タブでExcelファイルをアップロードしてください。")
+        st.stop()
 
     # イベント設定
     st.subheader("📝 イベント設定")
@@ -70,34 +65,37 @@ with tabs[1]:
             service = build("calendar", "v3", credentials=creds)
             calendar_list = service.calendarList().list().execute()
             calendar_options = {cal['summary']: cal['id'] for cal in calendar_list['items']}
-            selected_calendar_name = st.selectbox("登録先カレンダーを選択", list(calendar_options.keys()))
+            
+            if not calendar_options:
+                st.error("利用可能なカレンダーが見つかりませんでした。Googleカレンダーの設定を確認してください。")
+                st.stop()
+
+            selected_calendar_name = st.selectbox("登録先カレンダーを選択", list(calendar_options.keys()), key="reg_calendar_select")
             calendar_id = calendar_options[selected_calendar_name]
 
             # データ処理と登録
             st.subheader("➡️ イベント登録")
             if st.button("Googleカレンダーに登録する"):
                 with st.spinner("イベントデータを処理中..."):
-                    # uploaded_filesを直接渡す
-                    df = process_excel_files(uploaded_files, description_columns, all_day_event, private_event)
+                    df = process_excel_files(st.session_state['uploaded_files'], description_columns, all_day_event, private_event)
                     if df.empty:
                         st.warning("有効なイベントデータがありません。")
-                        # st.stop() # ここで停止すると、成功メッセージが表示されないためコメントアウト
                     else:
-                        st.success(f"{len(df)} 件のイベントを登録します。")
+                        st.info(f"{len(df)} 件のイベントを登録します。")
                         progress = st.progress(0)
                         successful_registrations = 0
                         for i, row in df.iterrows():
                             try:
                                 if row['All Day Event'] == "True":
-                                    start_date = datetime.strptime(row['Start Date'], "%Y/%m/%d").strftime("%Y-%m-%d")
-                                    end_date = datetime.strptime(row['End Date'], "%Y/%m/%d").strftime("%Y-%m-%d")
+                                    start_date_str = datetime.strptime(row['Start Date'], "%Y/%m/%d").strftime("%Y-%m-%d")
+                                    end_date_str = datetime.strptime(row['End Date'], "%Y/%m/%d").strftime("%Y-%m-%d")
 
                                     event_data = {
                                         'summary': row['Subject'],
                                         'location': row['Location'] if pd.notna(row['Location']) else '',
                                         'description': row['Description'] if pd.notna(row['Description']) else '',
-                                        'start': {'date': start_date},
-                                        'end': {'date': end_date},
+                                        'start': {'date': start_date_str},
+                                        'end': {'date': end_date_str},
                                         'transparency': 'transparent' if row['Private'] == "True" else 'opaque'
                                     }
                                 else:
@@ -127,4 +125,62 @@ with tabs[1]:
             st.warning("Google認証の状態を確認するか、ページをリロードしてください。")
     else:
         st.warning("Google認証が完了していません。")
-        # st.stop() # 認証が完了していない場合でも、ユーザーに操作を継続させるためにコメントアウト
+
+with tabs[2]:
+    st.header("イベントを削除")
+
+    # Google認証 (削除機能も認証が必要)
+    st.subheader("🔐 Google認証")
+    creds_del = authenticate_google()
+
+    if creds_del:
+        try:
+            service_del = build("calendar", "v3", credentials=creds_del)
+            calendar_list_del = service_del.calendarList().list().execute()
+            calendar_options_del = {cal['summary']: cal['id'] for cal in calendar_list_del['items']}
+
+            if not calendar_options_del:
+                st.error("利用可能なカレンダーが見つかりませんでした。Googleカレンダーの設定を確認してください。")
+                st.stop()
+
+            selected_calendar_name_del = st.selectbox("削除対象カレンダーを選択", list(calendar_options_del.keys()), key="del_calendar_select")
+            calendar_id_del = calendar_options_del[selected_calendar_name_del]
+
+            st.subheader("🗓️ 削除期間の選択")
+            today = date.today()
+            # デフォルトで過去30日間のイベントを対象にする
+            default_start_date = today - timedelta(days=30)
+            default_end_date = today
+
+            delete_start_date = st.date_input("削除開始日", value=default_start_date)
+            delete_end_date = st.date_input("削除終了日", value=default_end_date)
+
+            if delete_start_date > delete_end_date:
+                st.error("削除開始日は終了日より前に設定してください。")
+            else:
+                st.subheader("🗑️ 削除実行")
+                # 削除実行ボタンの確認ダイアログ
+                if st.button("選択期間のイベントを削除する", key="delete_events_button"):
+                    st.warning(f"「{selected_calendar_name_del}」カレンダーから")
+                    st.warning(f"{delete_start_date.strftime('%Y年%m月%d日')}から{delete_end_date.strftime('%Y年%m月%d日')}までの")
+                    st.warning("全てのイベントを削除します。この操作は元に戻せません。よろしいですか？")
+                    
+                    if st.button("はい、削除を実行します", key="confirm_delete_button"):
+                        deleted_count = delete_events_from_calendar(
+                            service_del, calendar_id_del, 
+                            datetime.combine(delete_start_date, datetime.min.time()),
+                            datetime.combine(delete_end_date, datetime.max.time()) # 日付の終わりまで含める
+                        )
+                        if deleted_count > 0:
+                            st.success(f"✅ {deleted_count} 件のイベントが削除されました。")
+                        else:
+                            st.info("指定された期間内に削除するイベントは見つかりませんでした。")
+                    else:
+                        st.info("削除はキャンセルされました。")
+
+        except Exception as e:
+            st.error(f"カレンダーサービスの取得またはカレンダーリストの取得に失敗しました: {e}")
+            st.warning("Google認証の状態を確認するか、ページをリロードしてください。")
+    else:
+        st.warning("Google認証が完了していません。")
+
