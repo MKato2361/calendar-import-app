@@ -198,9 +198,16 @@ with tabs[2]:
                                 datetime.combine(delete_start_date, datetime.min.time()),
                                 datetime.combine(delete_end_date, datetime.max.time()) # 日付の終わりまで含める
                             )
-                            # delete_events_from_calendar 内で結果メッセージが表示されるため、
-                            # ここでは最終的なメッセージは不要です（二重表示になるため）。
-                            # もしここで表示したい場合は、delete_events_from_calendar からの st.info/success を削除してください。
+                            # 削除完了メッセージをここで表示
+                            if deleted_count > 0:
+                                st.success(f"✅ {deleted_count} 件のイベントが削除されました。")
+                            else:
+                                # calendar_utils.py 内で「見つかりませんでした」メッセージを出す場合があるため、
+                                # ここでは重複を避けるためにコメントアウト。
+                                # もし calendar_utils.py からのメッセージを削除するなら、ここで有効化。
+                                # st.info("指定された期間内に削除するイベントは見つかりませんでした。")
+                                pass # calendar_utils.py側でメッセージが出ているため、ここでは何もしない
+
                             st.session_state.show_delete_confirmation = False # 削除処理後、フラグをリセット
                             st.rerun() # 画面をリフレッシュしてメッセージを更新
                     with col2:
