@@ -43,7 +43,12 @@ with tabs[1]:
     if creds:
         service = build("calendar", "v3", credentials=creds)
         calendar_list = service.calendarList().list().execute()
-        calendar_options = {cal['summary']: cal['id'] for cal in calendar_list['items']}
+        calendar_options = {
+            cal['summary']: cal['id']
+            for cal in calendar_list['items']
+            if cal.get('accessRole') in ['owner', 'writer']
+            and not 'holiday@group.v.calendar.google.com' in cal['id']
+        }
         selected_calendar_name = st.selectbox("登録先カレンダーを選択", list(calendar_options.keys()))
         calendar_id = calendar_options[selected_calendar_name]
 
@@ -99,7 +104,12 @@ with tabs[2]:
     if creds:
         service = build("calendar", "v3", credentials=creds)
         calendar_list = service.calendarList().list().execute()
-        calendar_options = {cal['summary']: cal['id'] for cal in calendar_list['items']}
+        calendar_options = {
+            cal['summary']: cal['id']
+            for cal in calendar_list['items']
+            if cal.get('accessRole') in ['owner', 'writer']
+            and not 'holiday@group.v.calendar.google.com' in cal['id']
+        }
 
         selected_calendar_name = st.selectbox("削除対象カレンダーを選択", list(calendar_options.keys()), key="del_calendar")
         calendar_id = calendar_options[selected_calendar_name]
