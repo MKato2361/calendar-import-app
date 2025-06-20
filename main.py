@@ -182,21 +182,22 @@ with tabs[2]:
                 if 'last_deleted_count' not in st.session_state: # 削除件数を保持するstateを追加
                     st.session_state.last_deleted_count = None
 
-                # 「選択期間のイベントを削除する」ボタンが押されたら確認メッセージを表示
+                # 「選択期間のイベントを削除する」ボタン
+                # このボタンが押されたら確認フラグを立てて再描画
                 if st.button("選択期間のイベントを削除する", key="delete_events_button"):
+                    st.session_state.show_delete_confirmation = True 
+                    st.session_state.last_deleted_count = None # 新しい削除試行前に件数をリセット
+                    st.rerun() # 再描画して確認ダイアログを表示
+
+                # 確認フラグがTrueの場合にのみ確認メッセージと「はい」/「いいえ」ボタンを表示
+                if st.session_state.show_delete_confirmation:
                     st.warning(f"「{selected_calendar_name_del}」カレンダーから")
                     st.warning(f"{delete_start_date.strftime('%Y年%m月%d日')}から{delete_end_date.strftime('%Y年%m月%d日')}までの")
                     st.warning("全てのイベントを削除します。この操作は元に戻せません。よろしいですか？")
-                    st.session_state.show_delete_confirmation = True # 確認ダイアログを表示するフラグを立てる
-                    st.session_state.last_deleted_count = None # 新しい削除試行前に件数をリセット
-                    st.rerun() # ボタンクリックで再描画
-
-                # 確認フラグがTrueの場合にのみ「はい、削除を実行します」ボタンを表示
-                if st.session_state.show_delete_confirmation:
+                    
                     col1, col2 = st.columns(2)
                     with col1:
                         if st.button("はい、削除を実行します", key="confirm_delete_button_final"):
-                            # delete_events_from_calendar 関数内でスピナーとプログレスバーが処理されます
                             deleted_count = delete_events_from_calendar(
                                 service_del, calendar_id_del, 
                                 datetime.combine(delete_start_date, datetime.min.time()),
@@ -212,8 +213,9 @@ with tabs[2]:
                             st.session_state.last_deleted_count = None # 件数をリセット
                             st.rerun() # 画面をリフレッシュ
 
-                # 削除完了メッセージを表示
-                if st.session_state.last_deleted_count is not None:
+                # 削除完了メッセージを表示 (確認ダイアログとは独立して表示)
+                # show_delete_confirmationがTrueの間は表示しないようにする
+                if not st.session_state.show_delete_confirmation and st.session_state.last_deleted_count is not None:
                     if st.session_state.last_deleted_count > 0:
                         st.success(f"✅ {st.session_state.last_deleted_count} 件のイベントが削除されました。")
                     else:
