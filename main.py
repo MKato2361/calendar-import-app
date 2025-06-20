@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, date, timedelta
-from excel_parser import process_excel_files # Assuming excel_parser.py exists and is correctly implemented
+from excel_parser import process_excel_files
 from calendar_utils import authenticate_google, add_event_to_calendar, delete_events_from_calendar
 from googleapiclient.discovery import build
 
@@ -85,17 +85,6 @@ with tabs[1]:
             st.subheader("➡️ イベント登録")
             if st.button("Googleカレンダーに登録する"):
                 with st.spinner("イベントデータを処理中..."):
-                    # Assuming process_excel_files is a function you've defined elsewhere
-                    # It should take uploaded_files, description_columns, all_day_event, private_event
-                    # and return a DataFrame with event details.
-                    # For example purposes, let's assume a dummy process_excel_files for now
-                    # You should replace this with your actual excel_parser.py's process_excel_files
-                    try:
-                        from excel_parser import process_excel_files
-                    except ImportError:
-                        st.error("excel_parser.py が見つからないか、エラーがあります。")
-                        st.stop()
-
                     df = process_excel_files(st.session_state['uploaded_files'], description_columns, all_day_event, private_event)
                     if df.empty:
                         st.warning("有効なイベントデータがありません。")
