@@ -175,25 +175,41 @@ with tabs[2]:
                 st.error("削除開始日は終了日より前に設定してください。")
             else:
                 st.subheader("🗑️ 削除実行")
-                # 削除実行ボタンの確認ダイアログ
+
+                # 初期化
+                if 'show_delete_confirmation' not in st.session_state:
+                    st.session_state.show_delete_confirmation = False
+
+                # 「選択期間のイベントを削除する」ボタンが押されたら確認メッセージを表示
                 if st.button("選択期間のイベントを削除する", key="delete_events_button"):
                     st.warning(f"「{selected_calendar_name_del}」カレンダーから")
                     st.warning(f"{delete_start_date.strftime('%Y年%m月%d日')}から{delete_end_date.strftime('%Y年%m月%d日')}までの")
                     st.warning("全てのイベントを削除します。この操作は元に戻せません。よろしいですか？")
-                    
-                    # ユーザーに確認を促すための別のボタンを表示
-                    if st.button("はい、削除を実行します", key="confirm_delete_button"):
-                        deleted_count = delete_events_from_calendar(
-                            service_del, calendar_id_del, 
-                            datetime.combine(delete_start_date, datetime.min.time()),
-                            datetime.combine(delete_end_date, datetime.max.time()) # 日付の終わりまで含める
-                        )
-                        if deleted_count > 0:
-                            st.success(f"✅ {deleted_count} 件のイベントが削除されました。")
-                        else:
-                            st.info("指定された期間内に削除するイベントは見つかりませんでした。")
-                    else:
-                        st.info("削除はキャンセルされました。")
+                    st.session_state.show_delete_confirmation = True # 確認ダイアログを表示するフラグを立てる
+
+                # 確認フラグがTrueの場合にのみ「はい、削除を実行します」ボタンを表示
+                if st.session_state.show_delete_confirmation:
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button("はい、削除を実行します", key="confirm_delete_button_final"):
+                            with st.spinner("イベントを削除中..."):
+                                # ここで delete_events_from_calendar を呼び出す
+                                deleted_count = delete_events_from_calendar(
+                                    service_del, calendar_id_del, 
+                                    datetime.combine(delete_start_date, datetime.min.time()),
+                                    datetime.combine(delete_end_date, datetime.max.time()) # 日付の終わりまで含める
+                                )
+                                if deleted_count > 0:
+                                    st.success(f"✅ {deleted_count} 件のイベントが削除されました。")
+                                else:
+                                    st.info("指定された期間内に削除するイベントは見つかりませんでした。")
+                            st.session_state.show_delete_confirmation = False # 削除処理後、フラグをリセット
+                            st.rerun() # 画面をリフレッシュしてメッセージを更新
+                    with col2:
+                        if st.button("いいえ、キャンセルします", key="cancel_delete_button"):
+                            st.info("削除はキャンセルされました。")
+                            st.session_state.show_delete_confirmation = False # フラグをリセット
+                            st.rerun() # 画面をリフレッシュ
 
         except Exception as e:
             st.error(f"カレンダーサービスの取得またはカレンダーリストの取得に失敗しました: {e}")
