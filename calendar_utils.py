@@ -98,7 +98,7 @@ def delete_events_from_calendar(service, calendar_id, start_date: datetime, end_
     time_min_utc = (start_dt_jst - JST_OFFSET).isoformat(timespec='microseconds') + 'Z'
     time_max_utc = (end_dt_jst - JST_OFFSET).isoformat(timespec='microseconds') + 'Z'
 
-    st.write(f"検索期間 (UTC): {time_min_utc} から {time_max_utc}") # デバッグ用
+    # st.write(f"検索期間 (UTC): {time_min_utc} から {time_max_utc}") # デバッグ用
 
     deleted_count = 0
     all_events_to_delete = []
@@ -127,14 +127,14 @@ def delete_events_from_calendar(service, calendar_id, start_date: datetime, end_
                 return 0 # エラーが発生したら処理を中断
 
     total_events = len(all_events_to_delete)
+    
+    # 削除対象イベントがない場合、ここでリターン
     if total_events == 0:
-        st.info("指定された期間内に削除するイベントは見つかりませんでした。")
         return 0
 
-    st.info(f"{total_events} 件のイベントを削除します...")
+    # Step 2: 取得したイベントを削除（プログレスバー表示）
     progress_bar = st.progress(0)
     
-    # Step 2: 取得したイベントを削除
     for i, event in enumerate(all_events_to_delete):
         event_summary = event.get('summary', '不明なイベント')
         try:
