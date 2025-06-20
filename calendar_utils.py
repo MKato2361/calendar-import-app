@@ -55,3 +55,26 @@ def authenticate_google():
 def add_event_to_calendar(service, calendar_id, event_data):
     event = service.events().insert(calendarId=calendar_id, body=event_data).execute()
     return event.get("htmlLink")
+def delete_events_in_range(service, calendar_id, start_date, end_date):
+    deleted = 0
+    try:
+        events_result = service.events().list(
+            calendarId=calendar_id,
+            timeMin=start_date.isoformat() + 'Z',
+            timeMax=end_date.isoformat() + 'Z',
+            singleEvents=True,
+            orderBy='startTime'
+        ).execute()
+        events = events_result.get('items', [])
+
+        for event in events:
+            try:
+                service.events().delete(calendarId=calendar_id, eventId=event['id']).execute()
+                deleted += 1
+            except Exception as e:
+                st.warning(f"削除失敗: {event.get('summary', 'No Title')} → {e}")
+
+    except Exception as e:
+        st.error(f"イベント取得エラー: {e}")
+
+    return deleted

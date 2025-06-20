@@ -94,3 +94,23 @@ with tabs[1]:
                 st.success("✅ 登録が完了しました！")
     else:
         st.stop()
+        # 削除機能セクション
+        st.subheader("🗑 カレンダーイベント削除")
+        with st.expander("期間を指定して削除する"):
+            del_calendar_name = st.selectbox("削除対象カレンダーを選択", list(calendar_options.keys()), key="del_cal")
+            del_calendar_id = calendar_options[del_calendar_name]
+            col1, col2 = st.columns(2)
+            with col1:
+                del_start = st.date_input("削除開始日", datetime.today())
+            with col2:
+                del_end = st.date_input("削除終了日", datetime.today())
+
+            if st.button("⚠️ 指定期間のイベントをすべて削除"):
+                from calendar_utils import delete_events_in_range
+                deleted = delete_events_in_range(
+                    service,
+                    del_calendar_id,
+                    datetime.combine(del_start, datetime.min.time()),
+                    datetime.combine(del_end, datetime.max.time())
+                )
+                st.success(f"{deleted} 件のイベントを削除しました。")
