@@ -2,11 +2,23 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, date, timedelta
 from excel_parser import process_excel_files
-from calendar_utils import authenticate_google, add_event_to_calendar, delete_events_from_calendar
+# 認証関数をauthenticate_google_with_firestoreに変更
+from calendar_utils import initialize_firebase, authenticate_google_with_firestore, add_event_to_calendar, delete_events_from_calendar
 from googleapiclient.discovery import build
+import json # Firebase configをパースするために必要
 
 st.set_page_config(page_title="Googleカレンダー登録・削除ツール", layout="wide")
 st.title("📅 Googleカレンダー一括イベント登録・削除")
+
+# Firebaseの初期化
+# アプリケーションの最初に一度だけ実行されるようにする
+db, firebase_auth, firebase_initialized = initialize_firebase()
+
+# Firebaseの初期化が成功したかを確認し、失敗していればアプリを停止
+if not firebase_initialized:
+    st.error("Firebaseの初期化に失敗したため、アプリケーションは動作しません。Firebaseの設定を確認してください。")
+    st.stop()
+
 
 # ファイルアップロードとイベント設定、イベント削除のタブを作成
 tabs = st.tabs(["1. ファイルのアップロード", "2. イベントの登録", "3. イベントの削除"])
@@ -26,11 +38,13 @@ with tabs[0]:
                 st.warning(f"{file.name} の読み込みに失敗しました: {e}")
         # セッションステートにdescription_columns_poolを保存
         st.session_state['description_columns_pool'] = list(description_columns_pool)
-        # アップロードされたファイルをセッションステートに保存（ファイルオブジェクト自体は永続化できないので注意）
-        # process_excel_filesがファイルオブジェクトを直接受け取るため、この形を維持
+        # アップロードされたファイルをセッションステートに保存
+        # Streamlitのファイルアップローダーはファイルオブジェクトを返すため、そのまま渡せる
         st.session_state['uploaded_files'] = uploaded_files 
-    elif 'description_columns_pool' not in st.session_state:
-        st.session_state['description_columns_pool'] = [] # 初期化
+    
+    # セッションステートにdescription_columns_poolがない場合の初期化
+    if 'description_columns_pool' not in st.session_state:
+        st.session_state['description_columns_pool'] = [] 
     
     # 以前アップロードされたファイルがあればそれを表示
     if st.session_state.get('uploaded_files'):
@@ -41,6 +55,7 @@ with tabs[0]:
 
 with tabs[1]:
     st.header("イベントを登録")
+    # アップロードファイルがセッションステートにない場合、処理を停止
     if not st.session_state.get('uploaded_files'):
         st.info("先に「1. ファイルのアップロード」タブでExcelファイルをアップロードしてください。")
         st.stop()
@@ -58,9 +73,12 @@ with tabs[1]:
 
     # Google認証
     st.subheader("🔐 Google認証")
-    creds = authenticate_google()
+    # Firebaseのdbとauthオブジェクトをauthenticate_google_with_firestoreに渡す
+    creds, user_id = authenticate_google_with_firestore(db, firebase_auth)
 
     if creds:
+        # 認証されたユーザーIDを表示
+        # st.write(f"現在のユーザーID (Firebase): `{user_id}`") # calendar_utilsで表示されるためコメントアウト
         try:
             service = build("calendar", "v3", credentials=creds)
             calendar_list = service.calendarList().list().execute()
@@ -70,12 +88,13 @@ with tabs[1]:
                 st.error("利用可能なカレンダーが見つかりませんでした。Googleカレンダーの設定を確認してください。")
                 st.stop()
 
+            # selectboxのkeyをタブごとにユニークにする
             selected_calendar_name = st.selectbox("登録先カレンダーを選択", list(calendar_options.keys()), key="reg_calendar_select")
             calendar_id = calendar_options[selected_calendar_name]
 
             # データ処理と登録
             st.subheader("➡️ イベント登録")
-            if st.button("Googleカレンダーに登録する"):
+            if st.button("Googleカレンダーに登録する", key="register_events_button"):
                 with st.spinner("イベントデータを処理中..."):
                     df = process_excel_files(st.session_state['uploaded_files'], description_columns, all_day_event, private_event)
                     if df.empty:
@@ -87,6 +106,7 @@ with tabs[1]:
                         for i, row in df.iterrows():
                             try:
                                 if row['All Day Event'] == "True":
+                                    # 終日イベントの場合、日付のみを使用
                                     start_date_str = datetime.strptime(row['Start Date'], "%Y/%m/%d").strftime("%Y-%m-%d")
                                     end_date_str = datetime.strptime(row['End Date'], "%Y/%m/%d").strftime("%Y-%m-%d")
 
@@ -99,6 +119,7 @@ with tabs[1]:
                                         'transparency': 'transparent' if row['Private'] == "True" else 'opaque'
                                     }
                                 else:
+                                    # 時間指定イベントの場合、日付と時間を使用
                                     start_dt_str = f"{row['Start Date']} {row['Start Time']}"
                                     end_dt_str = f"{row['End Date']} {row['End Time']}"
 
@@ -131,9 +152,12 @@ with tabs[2]:
 
     # Google認証 (削除機能も認証が必要)
     st.subheader("🔐 Google認証")
-    creds_del = authenticate_google()
+    # Firebaseのdbとauthオブジェクトをauthenticate_google_with_firestoreに渡す
+    creds_del, user_id_del = authenticate_google_with_firestore(db, firebase_auth)
 
     if creds_del:
+        # 認証されたユーザーIDを表示
+        # st.write(f"現在のユーザーID (Firebase): `{user_id_del}`") # calendar_utilsで表示されるためコメントアウト
         try:
             service_del = build("calendar", "v3", credentials=creds_del)
             calendar_list_del = service_del.calendarList().list().execute()
@@ -143,6 +167,7 @@ with tabs[2]:
                 st.error("利用可能なカレンダーが見つかりませんでした。Googleカレンダーの設定を確認してください。")
                 st.stop()
 
+            # selectboxのkeyをタブごとにユニークにする
             selected_calendar_name_del = st.selectbox("削除対象カレンダーを選択", list(calendar_options_del.keys()), key="del_calendar_select")
             calendar_id_del = calendar_options_del[selected_calendar_name_del]
 
@@ -152,20 +177,21 @@ with tabs[2]:
             default_start_date = today - timedelta(days=30)
             default_end_date = today
 
-            delete_start_date = st.date_input("削除開始日", value=default_start_date)
-            delete_end_date = st.date_input("削除終了日", value=default_end_date)
+            delete_start_date = st.date_input("削除開始日", value=default_start_date, key="delete_start_date")
+            delete_end_date = st.date_input("削除終了日", value=default_end_date, key="delete_end_date")
 
             if delete_start_date > delete_end_date:
                 st.error("削除開始日は終了日より前に設定してください。")
             else:
                 st.subheader("🗑️ 削除実行")
                 # 削除実行ボタンの確認ダイアログ
-                if st.button("選択期間のイベントを削除する", key="delete_events_button"):
-                    st.warning(f"「{selected_calendar_name_del}」カレンダーから")
-                    st.warning(f"{delete_start_date.strftime('%Y年%m月%d日')}から{delete_end_date.strftime('%Y年%m月%d日')}までの")
-                    st.warning("全てのイベントを削除します。この操作は元に戻せません。よろしいですか？")
+                if st.button("選択期間のイベントを削除する", key="delete_events_trigger_button"):
+                    st.warning(f"「**{selected_calendar_name_del}**」カレンダーから")
+                    st.warning(f"**{delete_start_date.strftime('%Y年%m月%d日')}**から**{delete_end_date.strftime('%Y年%m月%d日')}**までの")
+                    st.warning("**全てのイベントを削除します。この操作は元に戻せません。よろしいですか？**")
                     
-                    if st.button("はい、削除を実行します", key="confirm_delete_button"):
+                    # ユーザーに確認を促すための別のボタンを表示
+                    if st.button("はい、削除を実行します", key="confirm_delete_action_button"):
                         deleted_count = delete_events_from_calendar(
                             service_del, calendar_id_del, 
                             datetime.combine(delete_start_date, datetime.min.time()),
@@ -183,4 +209,3 @@ with tabs[2]:
             st.warning("Google認証の状態を確認するか、ページをリロードしてください。")
     else:
         st.warning("Google認証が完了していません。")
-
