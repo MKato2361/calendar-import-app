@@ -77,4 +77,3 @@ def delete_events_in_range(service, calendar_id, start_date, end_date, keyword=N
     except Exception as e:
         st.error(f"イベント取得エラー: {e}")
     return deleted
-
