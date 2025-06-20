@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, date, timedelta
-from excel_parser import process_excel_files
+from excel_parser import process_excel_files # Assuming excel_parser.py exists and is correctly implemented
 from calendar_utils import authenticate_google, add_event_to_calendar, delete_events_from_calendar
 from googleapiclient.discovery import build
 
@@ -66,19 +66,36 @@ with tabs[1]:
         try:
             service = build("calendar", "v3", credentials=creds)
             calendar_list = service.calendarList().list().execute()
-            calendar_options = {cal['summary']: cal['id'] for cal in calendar_list['items']}
             
-            if not calendar_options:
-                st.error("利用可能なカレンダーが見つかりませんでした。Googleカレンダーの設定を確認してください。")
+            # 読み取り専用カレンダーを除外
+            editable_calendar_options = {
+                cal['summary']: cal['id'] 
+                for cal in calendar_list['items'] 
+                if cal.get('accessRole') != 'reader'
+            }
+            
+            if not editable_calendar_options:
+                st.error("登録可能なカレンダーが見つかりませんでした。Googleカレンダーの設定を確認してください。")
                 st.stop()
 
-            selected_calendar_name = st.selectbox("登録先カレンダーを選択", list(calendar_options.keys()), key="reg_calendar_select")
-            calendar_id = calendar_options[selected_calendar_name]
+            selected_calendar_name = st.selectbox("登録先カレンダーを選択", list(editable_calendar_options.keys()), key="reg_calendar_select")
+            calendar_id = editable_calendar_options[selected_calendar_name]
 
             # データ処理と登録
             st.subheader("➡️ イベント登録")
             if st.button("Googleカレンダーに登録する"):
                 with st.spinner("イベントデータを処理中..."):
+                    # Assuming process_excel_files is a function you've defined elsewhere
+                    # It should take uploaded_files, description_columns, all_day_event, private_event
+                    # and return a DataFrame with event details.
+                    # For example purposes, let's assume a dummy process_excel_files for now
+                    # You should replace this with your actual excel_parser.py's process_excel_files
+                    try:
+                        from excel_parser import process_excel_files
+                    except ImportError:
+                        st.error("excel_parser.py が見つからないか、エラーがあります。")
+                        st.stop()
+
                     df = process_excel_files(st.session_state['uploaded_files'], description_columns, all_day_event, private_event)
                     if df.empty:
                         st.warning("有効なイベントデータがありません。")
@@ -141,14 +158,20 @@ with tabs[2]:
         try:
             service_del = build("calendar", "v3", credentials=creds_del)
             calendar_list_del = service_del.calendarList().list().execute()
-            calendar_options_del = {cal['summary']: cal['id'] for cal in calendar_list_del['items']}
+            
+            # 読み取り専用カレンダーを除外
+            editable_calendar_options_del = {
+                cal['summary']: cal['id'] 
+                for cal in calendar_list_del['items'] 
+                if cal.get('accessRole') != 'reader'
+            }
 
-            if not calendar_options_del:
-                st.error("利用可能なカレンダーが見つかりませんでした。Googleカレンダーの設定を確認してください。")
+            if not editable_calendar_options_del:
+                st.error("削除可能なカレンダーが見つかりませんでした。Googleカレンダーの設定を確認してください。")
                 st.stop()
 
-            selected_calendar_name_del = st.selectbox("削除対象カレンダーを選択", list(calendar_options_del.keys()), key="del_calendar_select")
-            calendar_id_del = calendar_options_del[selected_calendar_name_del]
+            selected_calendar_name_del = st.selectbox("削除対象カレンダーを選択", list(editable_calendar_options_del.keys()), key="del_calendar_select")
+            calendar_id_del = editable_calendar_options_del[selected_calendar_name_del]
 
             st.subheader("🗓️ 削除期間の選択")
             today = date.today()
@@ -188,4 +211,3 @@ with tabs[2]:
             st.warning("Google認証の状態を確認するか、ページをリロードしてください。")
     else:
         st.warning("Google認証が完了していません。")
-
