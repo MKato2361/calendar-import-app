@@ -4,7 +4,7 @@ import streamlit as st
 from google_auth_oauthlib.flow import Flow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
-from datetime import datetime, timedelta, timezone # <-- ここを修正
+from datetime import datetime, timedelta, timezone 
 
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
 TOKEN_FILE = "token.pickle" # 認証トークンを保存するファイル名
@@ -90,25 +90,22 @@ def delete_events_from_calendar(service, calendar_id, start_date: datetime, end_
     """
     指定された期間内のGoogleカレンダーイベントを削除します。
     """
-    # JSTのオフセット
     JST_OFFSET = timedelta(hours=9)
 
-    # start_date, end_dateはStreamlitのdate_inputから来ているため、datetimeオブジェクトに変換時に時間部分が0:0:0になっている。
-    # そのため、正確な範囲をカバーするために以下のように変換する。
     start_dt_jst = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
     end_dt_jst = end_date.replace(hour=23, minute=59, second=59, microsecond=999999)
 
-    # JSTのdatetimeオブジェクトをUTCに変換し、RFC3339形式の文字列にする
-    # .isoformat()でタイムゾーン情報を含めない場合、APIはUTCとして解釈するので'Z'を付加する
     time_min_utc = (start_dt_jst - JST_OFFSET).isoformat(timespec='microseconds') + 'Z'
     time_max_utc = (end_dt_jst - JST_OFFSET).isoformat(timespec='microseconds') + 'Z'
 
     st.write(f"検索期間 (UTC): {time_min_utc} から {time_max_utc}") # デバッグ用
 
     deleted_count = 0
+    all_events_to_delete = []
     page_token = None
 
-    with st.spinner(f"{start_date.strftime('%Y/%m/%d')}から{end_date.strftime('%Y/%m/%d')}までのイベントを検索中..."):
+    # Step 1: 削除対象イベントをすべてリストアップ
+    with st.spinner(f"{start_date.strftime('%Y/%m/%d')}から{end_date.strftime('%Y/%m/%d')}までの削除対象イベントを検索中..."):
         while True:
             try:
                 events_result = service.events().list(
@@ -120,28 +117,33 @@ def delete_events_from_calendar(service, calendar_id, start_date: datetime, end_
                     pageToken=page_token
                 ).execute()
                 events = events_result.get('items', [])
+                all_events_to_delete.extend(events) # 取得したイベントをリストに追加
 
-                if not events:
-                    break # イベントがなければループを終了
-
-                for event in events:
-                    # デバッグ情報
-                    event_summary = event.get('summary', '不明なイベント')
-                    event_start = event['start'].get('dateTime', event['start'].get('date'))
-                    st.info(f"削除対象イベント: {event_summary} (開始: {event_start})")
-
-                    try:
-                        service.events().delete(calendarId=calendar_id, eventId=event['id']).execute()
-                        deleted_count += 1
-                        st.success(f"イベント '{event_summary}' を削除しました。")
-                    except Exception as e:
-                        st.warning(f"イベント '{event_summary}' の削除に失敗しました: {e}")
-                
                 page_token = events_result.get('nextPageToken')
                 if not page_token:
-                    break # 次のページがなければループを終了
+                    break 
             except Exception as e:
                 st.error(f"イベントの検索中にエラーが発生しました: {e}")
-                break # エラーが発生したらループを終了
+                return 0 # エラーが発生したら処理を中断
+
+    total_events = len(all_events_to_delete)
+    if total_events == 0:
+        st.info("指定された期間内に削除するイベントは見つかりませんでした。")
+        return 0
+
+    st.info(f"{total_events} 件のイベントを削除します...")
+    progress_bar = st.progress(0)
+    
+    # Step 2: 取得したイベントを削除
+    for i, event in enumerate(all_events_to_delete):
+        event_summary = event.get('summary', '不明なイベント')
+        try:
+            service.events().delete(calendarId=calendar_id, eventId=event['id']).execute()
+            deleted_count += 1
+        except Exception as e:
+            st.warning(f"イベント '{event_summary}' の削除に失敗しました: {e}")
+        
+        # プログレスバーを更新
+        progress_bar.progress((i + 1) / total_events)
     
     return deleted_count
