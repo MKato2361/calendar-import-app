@@ -10,23 +10,24 @@ from config import SCOPES
 def authenticate_google():
     creds = None
 
-    # ユーザーごとのトークン保存
+    # ユーザーごとにトークンを分けて保存
     user_id = getpass.getuser()
     token_dir = "tokens"
     os.makedirs(token_dir, exist_ok=True)
     token_path = os.path.join(token_dir, f"token_{user_id}.pickle")
 
-    # すでにトークンがあれば読み込む
+    # 既存トークンを読み込み
     if os.path.exists(token_path):
         with open(token_path, "rb") as token:
             creds = pickle.load(token)
 
-    # トークンがない or 期限切れの場合は新規認証
+    # トークンが無効または存在しない場合は認証フロー
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
             try:
+                # secrets.tomlからクライアントID等を取得
                 client_config = {
                     "installed": {
                         "client_id": st.secrets["google"]["client_id"],
@@ -37,22 +38,13 @@ def authenticate_google():
                     }
                 }
 
-                # 認証フローの生成
+                # ローカルサーバでブラウザを開き認証（最も安定）
                 flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
-                auth_url, _ = flow.authorization_url(prompt='consent')
+                creds = flow.run_local_server(port=0, open_browser=True)
 
-                # Streamlit 上に URL を表示
-                st.warning("以下のURLをブラウザで開いて、Googleアカウントで認証してください。")
-                st.code(auth_url, language='text')
-
-                # ユーザーから認証コードを入力してもらう
-                auth_code = st.text_input("上のURLで取得した認証コードを貼り付けてください")
-
-                if auth_code:
-                    flow.fetch_token(code=auth_code)
-                    creds = flow.credentials
-                    with open(token_path, "wb") as token:
-                        pickle.dump(creds, token)
+                # トークン保存
+                with open(token_path, "wb") as token:
+                    pickle.dump(creds, token)
             except Exception as e:
                 st.error(f"Google認証に失敗しました: {e}")
                 return None
