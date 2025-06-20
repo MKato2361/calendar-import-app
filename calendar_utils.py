@@ -5,29 +5,28 @@ import getpass
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
-from config import SCOPES  # SCOPESはconfig.pyにて定義
+from config import SCOPES
 
 def authenticate_google():
     creds = None
 
-    # ✅ ユーザーごとにトークンファイルを分けて保存
+    # ユーザーごとのトークン保存
     user_id = getpass.getuser()
     token_dir = "tokens"
     os.makedirs(token_dir, exist_ok=True)
     token_path = os.path.join(token_dir, f"token_{user_id}.pickle")
 
-    # 保存済みトークンがある場合は読み込む
+    # すでにトークンがあれば読み込む
     if os.path.exists(token_path):
         with open(token_path, "rb") as token:
             creds = pickle.load(token)
 
-    # トークンがないか期限切れの場合は再認証
+    # トークンがない or 期限切れの場合は新規認証
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
             try:
-                # secrets.toml に保存された認証情報を使う
                 client_config = {
                     "installed": {
                         "client_id": st.secrets["google"]["client_id"],
@@ -37,12 +36,23 @@ def authenticate_google():
                         "redirect_uris": ["http://localhost"]
                     }
                 }
-                flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
-                creds = flow.run_local_server(port=0, open_browser=False)  # 自動で開けない場合でも手動でOK
 
-                # 新しいトークンを保存
-                with open(token_path, "wb") as token:
-                    pickle.dump(creds, token)
+                # 認証フローの生成
+                flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
+                auth_url, _ = flow.authorization_url(prompt='consent')
+
+                # Streamlit 上に URL を表示
+                st.warning("以下のURLをブラウザで開いて、Googleアカウントで認証してください。")
+                st.code(auth_url, language='text')
+
+                # ユーザーから認証コードを入力してもらう
+                auth_code = st.text_input("上のURLで取得した認証コードを貼り付けてください")
+
+                if auth_code:
+                    flow.fetch_token(code=auth_code)
+                    creds = flow.credentials
+                    with open(token_path, "wb") as token:
+                        pickle.dump(creds, token)
             except Exception as e:
                 st.error(f"Google認証に失敗しました: {e}")
                 return None
@@ -75,3 +85,4 @@ def delete_events_in_range(service, calendar_id, start_date, end_date, keyword=N
     except Exception as e:
         st.error(f"イベント取得エラー: {e}")
     return deleted
+
