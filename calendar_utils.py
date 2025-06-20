@@ -5,113 +5,28 @@ from google_auth_oauthlib.flow import Flow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from datetime import datetime
-import json # Firebase configをパースするために必要
-
-# Firebase関連のインポート
-# Canvas環境ではfirebase_adminのSDKが利用可能
-from firebase_admin import credentials, firestore, auth, initialize_app
 
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
+TOKEN_FILE = "token.pickle" # 認証トークンを保存するファイル名
 
-# Firebaseを初期化（一度だけ実行）
-# Canvas環境で提供される__firebase_config, __app_id, __initial_auth_tokenを使用
-def initialize_firebase():
-    # StreamlitのセッションステートにFirebase初期化済みフラグがあるか確認
-    if 'firebase_initialized' not in st.session_state or not st.session_state.firebase_initialized:
-        try:
-            # st.secretsからFirebase設定を読み込む
-            # __firebase_configはJSON文字列またはDictとして提供されることを想定
-            firebase_config = {}
-            if "__firebase_config" in st.secrets:
-                # secrets.tomlでディクショナリとして定義されている場合
-                firebase_config = st.secrets["__firebase_config"]
-            elif "FIREBASE_CONFIG" in os.environ:
-                # 環境変数としてJSON文字列で定義されている場合
-                firebase_config = json.loads(os.environ["FIREBASE_CONFIG"])
-            else:
-                st.error("Firebaseの設定が見つかりません。Streamlit Secretsまたは環境変数に'__firebase_config'を設定してください。")
-                st.session_state['firebase_initialized'] = False
-                return None, None, False
-
-            # credentials.Certificateはdictを受け取るため、直接渡す
-            cred = credentials.Certificate(firebase_config)
-            initialize_app(cred)
-            st.session_state['firebase_initialized'] = True
-            st.session_state['db'] = firestore.client()
-            st.session_state['auth'] = auth
-            st.info("Firebaseを初期化しました。")
-        except Exception as e:
-            st.error(f"Firebaseの初期化に失敗しました: {e}")
-            st.session_state['firebase_initialized'] = False # 初期化失敗フラグ
-            return None, None, False
-    
-    return st.session_state.get('db'), st.session_state.get('auth'), st.session_state.get('firebase_initialized')
-
-
-def authenticate_google_with_firestore(db, firebase_auth):
-    """
-    Firebase Authenticationを通じてユーザーを認証し、
-    FirestoreからGoogle Calendar APIの認証情報を読み書きします。
-    """
+def authenticate_google():
     creds = None
-    user_id = None # 認証されたユーザーのID
+    
+    # 1. まず現在のセッションの認証情報がst.session_stateにあるか確認します
+    if 'credentials' in st.session_state and st.session_state['credentials'] and st.session_state['credentials'].valid:
+        creds = st.session_state['credentials']
+        return creds
 
-    # Firebase認証の実行または既存のユーザーIDの取得
-    if 'firebase_user_id' not in st.session_state:
+    # 2. session_stateにない場合、token.pickleから永続化された認証情報を読み込もうとします
+    if os.path.exists(TOKEN_FILE):
         try:
-            # Canvas環境から提供される初期認証トークンを使用
-            if "__initial_auth_token" in st.secrets:
-                token = st.secrets["__initial_auth_token"]
-                user = firebase_auth.sign_in_with_custom_token(token)
-                user_id = user.uid
-                st.session_state['firebase_user_id'] = user_id
-                st.info(f"Firebaseでカスタム認証済み: UID {user_id}")
-            else:
-                # 初期トークンがない場合、匿名認証を試みる
-                user = firebase_auth.sign_in_anonymously()
-                user_id = user.uid
-                st.session_state['firebase_user_id'] = user_id
-                st.info(f"Firebaseで匿名認証済み: UID {user_id}")
+            with open(TOKEN_FILE, "rb") as token:
+                creds = pickle.load(token)
+            # 読み込んだ認証情報をsession_stateに保存し、このセッションで再利用できるようにします
+            st.session_state['credentials'] = creds 
         except Exception as e:
-            st.error(f"Firebase認証に失敗しました: {e}")
-            return None, None
-    else:
-        user_id = st.session_state['firebase_user_id']
-        st.write(f"現在のFirebaseユーザーID: `{user_id}`") # ユーザーIDをUIに表示
-        st.info(f"FirebaseセッションにUID {user_id} があります。")
-
-
-    # Google認証情報のFirestoreパス
-    # __app_idはCanvas環境で提供されるアプリケーションID
-    # もし__app_idが利用できない場合はデフォルト値を使用
-    app_id = st.secrets.get("__app_id", "default-app-id")
-    # Firestoreのパスは、/artifacts/{appId}/users/{userId}/google_creds/calendar_api_token
-    creds_doc_ref = db.collection('artifacts').document(app_id).collection('users').document(user_id).collection('google_creds').document('calendar_api_token')
-
-    # 1. まず現在のStreamlitセッションの認証情報（メモリ上）があるか確認します
-    if 'google_credentials' in st.session_state and st.session_state['google_credentials'] and st.session_state['google_credentials'].valid:
-        creds = st.session_state['google_credentials']
-        return creds, user_id
-
-    # 2. session_stateにない場合、Firestoreから永続化された認証情報を読み込もうとします
-    try:
-        doc = creds_doc_ref.get()
-        if doc.exists:
-            pickled_creds = doc.to_dict().get('token')
-            if pickled_creds:
-                creds = pickle.loads(pickled_creds)
-                # 読み込んだ認証情報が有効な場合は、session_stateに保存し再利用
-                if creds.valid:
-                    st.session_state['google_credentials'] = creds 
-                    st.info("FirestoreからGoogle認証情報を読み込みました。")
-                else:
-                    st.warning("Firestoreの認証情報が有効ではありません。リフレッシュを試みます。")
-                    creds = None # 無効な場合はリフレッシュまたは再認証へ
-        else:
-            st.info("FirestoreにGoogle認証情報が見つかりませんでした。")
-    except Exception as e:
-        st.warning(f"Firestoreからの認証情報読み込みに失敗しました: {e}。再認証してください。")
-        creds = None
+            st.warning(f"既存のトークンファイルの読み込みに失敗しました: {e}。再認証してください。")
+            creds = None
 
     # 3. 認証情報が有効でない、または期限切れの場合、更新または再認証を行います
     if not creds or not creds.valid:
@@ -119,15 +34,15 @@ def authenticate_google_with_firestore(db, firebase_auth):
             # トークンが期限切れでリフレッシュトークンがある場合、トークンをリフレッシュします
             try:
                 creds.refresh(Request())
-                # リフレッシュされた認証情報をFirestoreとsession_stateに保存します
-                # IMPORTANT: In a production environment, sensitive information like refresh tokens should be encrypted.
-                creds_doc_ref.set({'token': pickle.dumps(creds)})
-                st.session_state['google_credentials'] = creds
-                st.success("Google認証トークンを更新し、Firestoreに保存しました。")
+                # リフレッシュされた認証情報をファイルとsession_stateに保存します
+                with open(TOKEN_FILE, "wb") as token:
+                    pickle.dump(creds, token)
+                st.session_state['credentials'] = creds
+                st.info("認証トークンを更新しました。")
                 st.rerun() # トークン更新後、アプリを再実行して変更を反映
             except Exception as e:
                 st.error(f"トークンのリフレッシュに失敗しました。再認証してください: {e}")
-                st.session_state['google_credentials'] = None
+                st.session_state['credentials'] = None
                 creds = None
         else: # 有効な認証情報がない場合、新しい認証フローを開始します
             try:
@@ -151,18 +66,18 @@ def authenticate_google_with_firestore(db, firebase_auth):
                 if code:
                     flow.fetch_token(code=code)
                     creds = flow.credentials
-                    # 新しい認証情報をFirestoreとsession_stateに保存します
-                    # IMPORTANT: In a production environment, sensitive information like refresh tokens should be encrypted.
-                    creds_doc_ref.set({'token': pickle.dumps(creds)})
-                    st.session_state['google_credentials'] = creds
-                    st.success("Google認証が完了しました！Firestoreに保存しました。")
+                    # 新しい認証情報をファイルとsession_stateに保存します
+                    with open(TOKEN_FILE, "wb") as token:
+                        pickle.dump(creds, token)
+                    st.session_state['credentials'] = creds
+                    st.success("Google認証が完了しました！")
                     st.rerun() # 認証成功後、アプリを再読み込み
             except Exception as e:
                 st.error(f"Google認証に失敗しました: {e}")
-                st.session_state['google_credentials'] = None
-                return None, None
+                st.session_state['credentials'] = None
+                return None
     
-    return creds, user_id
+    return creds
 
 def add_event_to_calendar(service, calendar_id, event_data):
     """
@@ -213,4 +128,5 @@ def delete_events_from_calendar(service, calendar_id, start_date: datetime, end_
                 break # 次のページがなければループを終了
     
     return deleted_count
+
 
