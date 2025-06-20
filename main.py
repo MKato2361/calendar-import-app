@@ -179,6 +179,8 @@ with tabs[2]:
                 # 初期化
                 if 'show_delete_confirmation' not in st.session_state:
                     st.session_state.show_delete_confirmation = False
+                if 'last_deleted_count' not in st.session_state: # 削除件数を保持するstateを追加
+                    st.session_state.last_deleted_count = None
 
                 # 「選択期間のイベントを削除する」ボタンが押されたら確認メッセージを表示
                 if st.button("選択期間のイベントを削除する", key="delete_events_button"):
@@ -186,6 +188,8 @@ with tabs[2]:
                     st.warning(f"{delete_start_date.strftime('%Y年%m月%d日')}から{delete_end_date.strftime('%Y年%m月%d日')}までの")
                     st.warning("全てのイベントを削除します。この操作は元に戻せません。よろしいですか？")
                     st.session_state.show_delete_confirmation = True # 確認ダイアログを表示するフラグを立てる
+                    st.session_state.last_deleted_count = None # 新しい削除試行前に件数をリセット
+                    st.rerun() # ボタンクリックで再描画
 
                 # 確認フラグがTrueの場合にのみ「はい、削除を実行します」ボタンを表示
                 if st.session_state.show_delete_confirmation:
@@ -198,23 +202,24 @@ with tabs[2]:
                                 datetime.combine(delete_start_date, datetime.min.time()),
                                 datetime.combine(delete_end_date, datetime.max.time()) # 日付の終わりまで含める
                             )
-                            # 削除完了メッセージをここで表示
-                            if deleted_count > 0:
-                                st.success(f"✅ {deleted_count} 件のイベントが削除されました。")
-                            else:
-                                # calendar_utils.py 内で「見つかりませんでした」メッセージを出す場合があるため、
-                                # ここでは重複を避けるためにコメントアウト。
-                                # もし calendar_utils.py からのメッセージを削除するなら、ここで有効化。
-                                # st.info("指定された期間内に削除するイベントは見つかりませんでした。")
-                                pass # calendar_utils.py側でメッセージが出ているため、ここでは何もしない
-
+                            st.session_state.last_deleted_count = deleted_count # 削除件数を保存
                             st.session_state.show_delete_confirmation = False # 削除処理後、フラグをリセット
                             st.rerun() # 画面をリフレッシュしてメッセージを更新
                     with col2:
                         if st.button("いいえ、キャンセルします", key="cancel_delete_button"):
                             st.info("削除はキャンセルされました。")
                             st.session_state.show_delete_confirmation = False # フラグをリセット
+                            st.session_state.last_deleted_count = None # 件数をリセット
                             st.rerun() # 画面をリフレッシュ
+
+                # 削除完了メッセージを表示
+                if st.session_state.last_deleted_count is not None:
+                    if st.session_state.last_deleted_count > 0:
+                        st.success(f"✅ {st.session_state.last_deleted_count} 件のイベントが削除されました。")
+                    else:
+                        st.info("指定された期間内に削除するイベントは見つかりませんでした。")
+                    # メッセージ表示後、stateをクリアして次回表示を防ぐ
+                    # st.session_state.last_deleted_count = None # これを有効にすると一度しか表示されない
 
         except Exception as e:
             st.error(f"カレンダーサービスの取得またはカレンダーリストの取得に失敗しました: {e}")
