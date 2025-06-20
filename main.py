@@ -97,7 +97,7 @@ with tabs[1]:
     else:
         st.stop()
 
-# イベント削除
+# イベント削除（キーワード付き）
 with tabs[2]:
     st.subheader("🗑 イベント一括削除")
     creds = authenticate_google()
@@ -120,11 +120,14 @@ with tabs[2]:
         with col2:
             end_date = st.date_input("削除終了日", value=datetime.today())
 
-        if st.button("⚠️ この期間のイベントをすべて削除"):
+        keyword = st.text_input("件名に含まれるキーワード（空欄で全件対象）", "")
+
+        if st.button("⚠️ この条件でイベントを削除"):
             deleted = delete_events_in_range(
                 service,
                 calendar_id,
                 datetime.combine(start_date, time.min),
-                datetime.combine(end_date, time.max)
+                datetime.combine(end_date, time.max),
+                keyword=keyword if keyword.strip() else None
             )
             st.success(f"{deleted} 件のイベントを削除しました。")

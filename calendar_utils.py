@@ -1,6 +1,7 @@
 import pickle
 import os
 import streamlit as st
+import getpass
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
@@ -9,7 +10,11 @@ SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
 def authenticate_google():
     creds = None
-    token_path = "token.pickle"
+    user_id = getpass.getuser()
+    token_dir = "tokens"
+    os.makedirs(token_dir, exist_ok=True)
+    token_path = os.path.join(token_dir, f"token_{user_id}.pickle")
+
     if os.path.exists(token_path):
         with open(token_path, "rb") as token:
             creds = pickle.load(token)
@@ -41,7 +46,7 @@ def add_event_to_calendar(service, calendar_id, event_data):
     event = service.events().insert(calendarId=calendar_id, body=event_data).execute()
     return event.get("htmlLink")
 
-def delete_events_in_range(service, calendar_id, start_date, end_date):
+def delete_events_in_range(service, calendar_id, start_date, end_date, keyword=None):
     deleted = 0
     try:
         events_result = service.events().list(
@@ -53,6 +58,8 @@ def delete_events_in_range(service, calendar_id, start_date, end_date):
         ).execute()
         events = events_result.get('items', [])
         for event in events:
+            if keyword and keyword not in event.get('summary', ''):
+                continue
             try:
                 service.events().delete(calendarId=calendar_id, eventId=event['id']).execute()
                 deleted += 1
