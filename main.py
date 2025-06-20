@@ -1,16 +1,18 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, time
 from excel_parser import process_excel_files
-from calendar_utils import authenticate_google, add_event_to_calendar
+from calendar_utils import authenticate_google, add_event_to_calendar, delete_events_in_range
 from config import SCOPES
 from googleapiclient.discovery import build
 
 st.set_page_config(page_title="Googleカレンダー登録ツール", layout="wide")
-st.title("\U0001F4C5 Googleカレンダー一括イベント登録")
+st.title("📅 Googleカレンダー一括イベント登録")
+
+# タブ構成
+tabs = st.tabs(["1. ファイルのアップロード", "2. イベントの設定・登録", "3. イベント一括削除"])
 
 # ファイルアップロード
-tabs = st.tabs(["1. ファイルのアップロード", "2. イベントの設定・登録"])
 with tabs[0]:
     uploaded_files = st.file_uploader("Excelファイルを選択（複数可）", type=["xlsx"], accept_multiple_files=True)
 
@@ -24,30 +26,33 @@ with tabs[0]:
             except Exception as e:
                 st.warning(f"{file.name} の読み込みに失敗しました: {e}")
 
+# イベント登録
 with tabs[1]:
     if not uploaded_files:
         st.info("先にExcelファイルをアップロードしてください。")
         st.stop()
 
-    # イベント設定
-    st.subheader("\U0001F4CC イベント設定")
+    st.subheader("📌 イベント設定")
     all_day_event = st.checkbox("終日イベントとして登録", value=False)
     private_event = st.checkbox("非公開イベントとして登録", value=True)
     description_columns = st.multiselect("説明欄に含める列（複数選択可）", sorted(description_columns_pool))
 
-    # Google認証
-    st.subheader("\U0001F512 Google認証")
+    st.subheader("🔐 Google認証")
     creds = authenticate_google()
 
     if creds:
         service = build("calendar", "v3", credentials=creds)
         calendar_list = service.calendarList().list().execute()
-        calendar_options = {cal['summary']: cal['id'] for cal in calendar_list['items']}
+        calendar_options = {
+            cal['summary']: cal['id']
+            for cal in calendar_list['items']
+            if cal.get('accessRole') in ['owner', 'writer']
+            and not 'holiday@group.v.calendar.google.com' in cal['id']
+        }
         selected_calendar_name = st.selectbox("登録先カレンダーを選択", list(calendar_options.keys()))
         calendar_id = calendar_options[selected_calendar_name]
 
-        # データ処理と登録
-        st.subheader("\U0001F4E4 イベント登録")
+        st.subheader("📤 イベント登録")
         if st.button("Googleカレンダーに登録する"):
             with st.spinner("イベントデータを処理中..."):
                 df = process_excel_files(uploaded_files, description_columns, all_day_event, private_event)
@@ -62,7 +67,6 @@ with tabs[1]:
                         if row['All Day Event'] == "True":
                             start_date = datetime.strptime(row['Start Date'], "%Y/%m/%d").strftime("%Y-%m-%d")
                             end_date = datetime.strptime(row['End Date'], "%Y/%m/%d").strftime("%Y-%m-%d")
-
                             event_data = {
                                 'summary': row['Subject'],
                                 'location': row['Location'] if pd.notna(row['Location']) else '',
@@ -74,10 +78,8 @@ with tabs[1]:
                         else:
                             start_dt_str = f"{row['Start Date']} {row['Start Time']}"
                             end_dt_str = f"{row['End Date']} {row['End Time']}"
-
                             start = datetime.strptime(start_dt_str, "%Y/%m/%d %H:%M").isoformat()
                             end = datetime.strptime(end_dt_str, "%Y/%m/%d %H:%M").isoformat()
-
                             event_data = {
                                 'summary': row['Subject'],
                                 'location': row['Location'] if pd.notna(row['Location']) else '',
@@ -94,3 +96,35 @@ with tabs[1]:
                 st.success("✅ 登録が完了しました！")
     else:
         st.stop()
+
+# イベント削除
+with tabs[2]:
+    st.subheader("🗑 イベント一括削除")
+    creds = authenticate_google()
+    if creds:
+        service = build("calendar", "v3", credentials=creds)
+        calendar_list = service.calendarList().list().execute()
+        calendar_options = {
+            cal['summary']: cal['id']
+            for cal in calendar_list['items']
+            if cal.get('accessRole') in ['owner', 'writer']
+            and not 'holiday@group.v.calendar.google.com' in cal['id']
+        }
+
+        selected_calendar_name = st.selectbox("削除対象カレンダーを選択", list(calendar_options.keys()), key="del_calendar")
+        calendar_id = calendar_options[selected_calendar_name]
+
+        col1, col2 = st.columns(2)
+        with col1:
+            start_date = st.date_input("削除開始日", value=datetime.today())
+        with col2:
+            end_date = st.date_input("削除終了日", value=datetime.today())
+
+        if st.button("⚠️ この期間のイベントをすべて削除"):
+            deleted = delete_events_in_range(
+                service,
+                calendar_id,
+                datetime.combine(start_date, time.min),
+                datetime.combine(end_date, time.max)
+            )
+            st.success(f"{deleted} 件のイベントを削除しました。")
