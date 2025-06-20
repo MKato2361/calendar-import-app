@@ -1,24 +1,33 @@
 import pickle
 import os
 import streamlit as st
+import getpass
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
-
-SCOPES = ["https://www.googleapis.com/auth/calendar"]
+from config import SCOPES  # SCOPESはconfig.pyにて定義
 
 def authenticate_google():
     creds = None
-    token_path = "token.pickle"
+
+    # ✅ ユーザーごとにトークンファイルを分けて保存
+    user_id = getpass.getuser()
+    token_dir = "tokens"
+    os.makedirs(token_dir, exist_ok=True)
+    token_path = os.path.join(token_dir, f"token_{user_id}.pickle")
+
+    # 保存済みトークンがある場合は読み込む
     if os.path.exists(token_path):
         with open(token_path, "rb") as token:
             creds = pickle.load(token)
 
+    # トークンがないか期限切れの場合は再認証
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
             try:
+                # secrets.toml に保存された認証情報を使う
                 client_config = {
                     "installed": {
                         "client_id": st.secrets["google"]["client_id"],
@@ -29,19 +38,22 @@ def authenticate_google():
                     }
                 }
                 flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
-                creds = flow.run_console()
+                creds = flow.run_local_server(port=0, open_browser=False)  # 自動で開けない場合でも手動でOK
+
+                # 新しいトークンを保存
                 with open(token_path, "wb") as token:
                     pickle.dump(creds, token)
             except Exception as e:
                 st.error(f"Google認証に失敗しました: {e}")
                 return None
+
     return creds
 
 def add_event_to_calendar(service, calendar_id, event_data):
     event = service.events().insert(calendarId=calendar_id, body=event_data).execute()
     return event.get("htmlLink")
 
-def delete_events_in_range(service, calendar_id, start_date, end_date):
+def delete_events_in_range(service, calendar_id, start_date, end_date, keyword=None):
     deleted = 0
     try:
         events_result = service.events().list(
@@ -53,6 +65,8 @@ def delete_events_in_range(service, calendar_id, start_date, end_date):
         ).execute()
         events = events_result.get('items', [])
         for event in events:
+            if keyword and keyword not in event.get('summary', ''):
+                continue
             try:
                 service.events().delete(calendarId=calendar_id, eventId=event['id']).execute()
                 deleted += 1
