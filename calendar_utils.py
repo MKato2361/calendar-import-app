@@ -34,7 +34,7 @@ def authenticate_google():
                     }
                 }
                 flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
-                creds = flow.run_console()
+                creds = flow.run_local_server(port=0)
                 with open(token_path, "wb") as token:
                     pickle.dump(creds, token)
             except Exception as e:
