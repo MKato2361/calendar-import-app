@@ -7,7 +7,7 @@ from googleapiclient.discovery import build
 from datetime import datetime
 
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
-TOKEN_FILE = "token.pickle" # 認証トークンを保存するファイル名
+# TOKEN_FILE は不要になります
 
 def authenticate_google():
     creds = None
@@ -17,34 +17,22 @@ def authenticate_google():
         creds = st.session_state['credentials']
         return creds
 
-    # 2. session_stateにない場合、token.pickleから永続化された認証情報を読み込もうとします
-    if os.path.exists(TOKEN_FILE):
-        try:
-            with open(TOKEN_FILE, "rb") as token:
-                creds = pickle.load(token)
-            # 読み込んだ認証情報をsession_stateに保存し、このセッションで再利用できるようにします
-            st.session_state['credentials'] = creds 
-        except Exception as e:
-            st.warning(f"既存のトークンファイルの読み込みに失敗しました: {e}。再認証してください。")
-            creds = None
-
-    # 3. 認証情報が有効でない、または期限切れの場合、更新または再認証を行います
+    # 認証情報がない場合、または期限切れの場合に認証フローを開始します
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             # トークンが期限切れでリフレッシュトークンがある場合、トークンをリフレッシュします
             try:
                 creds.refresh(Request())
-                # リフレッシュされた認証情報をファイルとsession_stateに保存します
-                with open(TOKEN_FILE, "wb") as token:
-                    pickle.dump(creds, token)
+                # リフレッシュされた認証情報をsession_stateに保存します
                 st.session_state['credentials'] = creds
                 st.info("認証トークンを更新しました。")
-                st.rerun() # トークン更新後、アプリを再実行して変更を反映
+                # st.rerun() # トークン更新後、アプリを再実行して変更を反映（不要な場合があるためコメントアウト）
             except Exception as e:
                 st.error(f"トークンのリフレッシュに失敗しました。再認証してください: {e}")
                 st.session_state['credentials'] = None
                 creds = None
-        else: # 有効な認証情報がない場合、新しい認証フローを開始します
+        else: # 有効な認証情報がない、またはリフレッシュトークンがない場合、新しい認証フローを開始します
+            st.warning("Googleカレンダーにアクセスするには認証が必要です。")
             try:
                 client_config = {
                     "installed": {
@@ -52,28 +40,38 @@ def authenticate_google():
                         "client_secret": st.secrets["google"]["client_secret"],
                         "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                         "token_uri": "https://oauth2.googleapis.com/token",
-                        "redirect_uris": ["urn:ietf:wg:oauth:2.0:oob"] # コンソール認証用
+                        # Streamlit Cloudでの動作を考慮し、redirect_urisを空にするか、
+                        # Webアプリケーション用のredirect_urisを設定します。
+                        # この例では、Streamlit CloudでのOAuthフローを簡略化するため、
+                        # 認証URLを直接ユーザーに表示し、ユーザーがコードを貼り付ける方式を維持します。
+                        # もしWebアプリケーションのリダイレクトURIを使用する場合は、
+                        # Google Cloud Consoleで設定したURIをここに追加し、flow.fetch_token()も変更が必要です。
+                        "redirect_uris": ["urn:ietf:wg:oauth:2.0:oob", "http://localhost"] # ローカルテスト用も含む
                     }
                 }
                 flow = Flow.from_client_config(client_config, SCOPES)
-                flow.redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
+                flow.redirect_uri = "urn:ietf:wg:oauth:2.0:oob" # OOB (Out-of-Band)方式を維持
+
                 auth_url, _ = flow.authorization_url(prompt='consent')
 
                 st.info("以下のURLをブラウザで開いて、表示されたコードをここに貼り付けてください：")
-                st.write(auth_url)
-                code = st.text_input("認証コードを貼り付けてください:")
+                st.markdown(f"**[Google認証ページを開く]({auth_url})**") # リンクとして表示
+                code = st.text_input("認証コードを貼り付けてください:", key="auth_code_input")
 
                 if code:
-                    flow.fetch_token(code=code)
-                    creds = flow.credentials
-                    # 新しい認証情報をファイルとsession_stateに保存します
-                    with open(TOKEN_FILE, "wb") as token:
-                        pickle.dump(creds, token)
-                    st.session_state['credentials'] = creds
-                    st.success("Google認証が完了しました！")
-                    st.rerun() # 認証成功後、アプリを再読み込み
+                    try:
+                        flow.fetch_token(code=code)
+                        creds = flow.credentials
+                        # 新しい認証情報をsession_stateに保存します
+                        st.session_state['credentials'] = creds
+                        st.success("Google認証が完了しました！")
+                        st.rerun() # 認証成功後、アプリを再読み込み
+                    except Exception as token_e:
+                        st.error(f"認証コードの検証に失敗しました。コードが正しいか確認してください。: {token_e}")
+                        st.session_state['credentials'] = None
+                        creds = None
             except Exception as e:
-                st.error(f"Google認証に失敗しました: {e}")
+                st.error(f"Google認証フローの開始に失敗しました: {e}")
                 st.session_state['credentials'] = None
                 return None
     
@@ -95,6 +93,7 @@ def delete_events_from_calendar(service, calendar_id, start_date: datetime, end_
     end_date_inclusive = end_date.replace(hour=23, minute=59, second=59, microsecond=999999)
     
     # ISO 8601形式に変換し、UTC時間として扱います
+    # StreamlitはデフォルトでUTCとしてISOフォーマットするため、Zを追加
     time_min = start_date.isoformat() + 'Z'
     time_max = end_date_inclusive.isoformat() + 'Z'
 
@@ -128,5 +127,3 @@ def delete_events_from_calendar(service, calendar_id, start_date: datetime, end_
                 break # 次のページがなければループを終了
     
     return deleted_count
-
-
