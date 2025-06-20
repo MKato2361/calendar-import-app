@@ -4,14 +4,14 @@ import streamlit as st
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
-from config import SCOPES, TOKEN_PATH, TOKEN_DIR
+
+SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
 def authenticate_google():
     creds = None
-    os.makedirs(TOKEN_DIR, exist_ok=True)
-
-    if os.path.exists(TOKEN_PATH):
-        with open(TOKEN_PATH, "rb") as token:
+    token_path = "token.pickle"
+    if os.path.exists(token_path):
+        with open(token_path, "rb") as token:
             creds = pickle.load(token)
 
     if not creds or not creds.valid:
@@ -29,8 +29,8 @@ def authenticate_google():
                     }
                 }
                 flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
-                creds = flow.run_local_server(port=0)
-                with open(TOKEN_PATH, "wb") as token:
+                creds = flow.run_console()
+                with open(token_path, "wb") as token:
                     pickle.dump(creds, token)
             except Exception as e:
                 st.error(f"Google認証に失敗しました: {e}")
@@ -41,7 +41,7 @@ def add_event_to_calendar(service, calendar_id, event_data):
     event = service.events().insert(calendarId=calendar_id, body=event_data).execute()
     return event.get("htmlLink")
 
-def delete_events_in_range(service, calendar_id, start_date, end_date, keyword=None):
+def delete_events_in_range(service, calendar_id, start_date, end_date):
     deleted = 0
     try:
         events_result = service.events().list(
@@ -53,8 +53,6 @@ def delete_events_in_range(service, calendar_id, start_date, end_date, keyword=N
         ).execute()
         events = events_result.get('items', [])
         for event in events:
-            if keyword and keyword not in event.get('summary', ''):
-                continue
             try:
                 service.events().delete(calendarId=calendar_id, eventId=event['id']).execute()
                 deleted += 1

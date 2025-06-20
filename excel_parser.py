@@ -3,12 +3,18 @@
 import pandas as pd
 import re
 import datetime
-import streamlit as st
 
 def clean_mng_num(value):
     if pd.isna(value):
         return ""
-    return re.sub(r"[^0-9A-Za-z]", "", str(value)).replace("HK", "")
+    return str(value).replace("HK", "").replace("-", "").strip()
+
+def format_description_value(val):
+    if pd.isna(val):
+        return ""
+    if isinstance(val, float) and val.is_integer():
+        return str(int(val))
+    return str(val)
 
 def find_closest_column(columns, keywords):
     for kw in keywords:
@@ -17,19 +23,8 @@ def find_closest_column(columns, keywords):
                 return col
     return None
 
-def format_description_value(val):
-    if pd.isna(val):
-        return ""
-    if isinstance(val, float):
-        return str(int(val)) if val.is_integer() else str(round(val, 2))
-    return str(val)
-
 def process_excel_files(uploaded_files, description_columns, all_day_event, private_event):
     dataframes = []
-
-    if not uploaded_files:
-        st.warning("Excelファイルをアップロードしてください。")
-        return pd.DataFrame()
 
     for uploaded_file in uploaded_files:
         try:
@@ -38,22 +33,17 @@ def process_excel_files(uploaded_files, description_columns, all_day_event, priv
             mng_col = find_closest_column(df.columns, ["管理番号"])
             if mng_col:
                 df["管理番号"] = df[mng_col].apply(clean_mng_num)
-            else:
-                st.warning(f"ファイル '{uploaded_file.name}' に '管理番号' が見つかりません。スキップします。")
-                continue
-            dataframes.append(df)
+                dataframes.append(df)
         except Exception as e:
-            st.error(f"ファイル '{uploaded_file.name}' の読み込みに失敗しました: {e}")
-            return pd.DataFrame()
+            print(f"ファイルの読み込みエラー: {uploaded_file.name} → {e}")
 
     if not dataframes:
         return pd.DataFrame()
 
     merged_df = dataframes[0]
-    for df in dataframes[1:]:
-        merged_df = pd.merge(merged_df, df, on="管理番号", how="outer")
+    for df_to_merge in dataframes[1:]:
+        merged_df = pd.merge(merged_df, df_to_merge, on="管理番号", how="outer")
 
-    merged_df["管理番号"] = merged_df["管理番号"].apply(clean_mng_num)
     merged_df.drop_duplicates(subset="管理番号", inplace=True)
 
     name_col = find_closest_column(merged_df.columns, ["物件名"])
@@ -62,7 +52,6 @@ def process_excel_files(uploaded_files, description_columns, all_day_event, priv
     addr_col = find_closest_column(merged_df.columns, ["住所", "所在地"])
 
     if not all([name_col, start_col, end_col]):
-        st.error("必要な列（物件名・予定開始・予定終了）が見つかりません。")
         return pd.DataFrame()
 
     merged_df = merged_df.dropna(subset=[start_col, end_col])
@@ -83,9 +72,11 @@ def process_excel_files(uploaded_files, description_columns, all_day_event, priv
         if isinstance(location, str) and "北海道札幌市" in location:
             location = location.replace("北海道札幌市", "")
 
-        description = " / ".join(
-            [format_description_value(row.get(col)) for col in description_columns if col in row]
-        )
+        description_parts = []
+        for col in description_columns:
+            if col in row:
+                description_parts.append(format_description_value(row[col]))
+        description = " / ".join(description_parts)
 
         output.append({
             "Subject": subj,
