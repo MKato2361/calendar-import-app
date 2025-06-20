@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import datetime
-from excel_parser import parse_excel
+from excel_parser import process_excel_files
 from calendar_utils import authenticate_google, add_event_to_calendar, delete_events_in_range
 from googleapiclient.discovery import build
 
@@ -15,7 +15,14 @@ uploaded_files = st.file_uploader("Excelファイルを選択 (複数可)", type
 st.header("📌 イベント設定")
 all_day = st.checkbox("終日イベントとして登録")
 private_event = st.checkbox("非公開イベントとして登録", value=True)
-description_cols = st.multiselect("説明欄に含める列（複数選択可）", [])
+
+description_cols = []
+if uploaded_files:
+    all_columns = set()
+    for f in uploaded_files:
+        df = pd.read_excel(f, engine="openpyxl")
+        all_columns.update(df.columns)
+    description_cols = st.multiselect("説明欄に含める列（複数選択可）", sorted(all_columns))
 
 # Google認証
 st.header("🔐 Google認証")
@@ -34,7 +41,7 @@ if service:
 # イベント登録処理
 if uploaded_files and calendar_id:
     if st.button("✅ イベント登録を実行"):
-        df = parse_excel(uploaded_files, description_cols, all_day, private_event)
+        df = process_excel_files(uploaded_files, description_cols, all_day, private_event)
         success = 0
         for _, row in df.iterrows():
             try:
