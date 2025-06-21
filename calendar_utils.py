@@ -2,6 +2,8 @@ import pickle
 import os
 import streamlit as st
 import hashlib
+CREDENTIALS_FILE = "credentials.json"
+SCOPES = ['https://www.googleapis.com/auth/calendar']
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google_auth_oauthlib.flow import Flow
 from google.auth.transport.requests import Request
