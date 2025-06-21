@@ -100,7 +100,13 @@ def authenticate_google():
             st.warning("トークンの読み込みに失敗しました。再認証が必要です。")
 
     if not creds or not creds.valid:
-        # 必要に応じて再認証処理
-        pass
+        flow = InstalledAppFlow.from_client_secrets_file(
+            CREDENTIALS_FILE, SCOPES)
+        creds = flow.run_local_server(port=0)
+
+        with open(token_file, "wb") as token:
+            pickle.dump(creds, token)
+
+        st.session_state['credentials'] = creds
 
     return creds
