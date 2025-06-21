@@ -2,6 +2,7 @@ import pickle
 import os
 import streamlit as st
 import hashlib
+from google_auth_oauthlib.flow import InstalledAppFlow
 from google_auth_oauthlib.flow import Flow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
@@ -77,6 +78,8 @@ def delete_events_from_calendar(service, calendar_id, start_date: datetime, end_
         progress_bar.progress((i + 1) / total_events)
     
     return deleted_count
+
+from google_auth_oauthlib.flow import InstalledAppFlow
 
 def get_user_token_file():
     user_info = st.session_state.get("user_id", st.session_state.get("run_id", str(datetime.now())))
