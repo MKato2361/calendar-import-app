@@ -9,13 +9,7 @@ from datetime import datetime, timedelta, timezone
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
 TOKEN_FILE = "token.pickle" # 認証トークンを保存するファイル名
 
-def authenticate_google():
-    creds = None
-    
-    # 1. まず現在のセッションの認証情報がst.session_stateにあるか確認します
-    if 'credentials' in st.session_state and st.session_state['credentials'] and st.session_state['credentials'].valid:
-        creds = st.session_state['credentials']
-        return creds
+
 
     # 2. session_stateにない場合、token.pickleから永続化された認証情報を読み込もうとします
     if os.path.exists(TOKEN_FILE):
@@ -147,3 +141,32 @@ def delete_events_from_calendar(service, calendar_id, start_date: datetime, end_
         progress_bar.progress((i + 1) / total_events)
     
     return deleted_count
+
+import hashlib
+
+def get_user_token_file():
+    user_info = st.session_state.get("user_id", st.session_state.get("run_id", str(datetime.now())))
+    user_hash = hashlib.sha256(user_info.encode()).hexdigest()
+    return f"token_{user_hash}.pickle"
+
+def authenticate_google():
+    creds = None
+    token_file = get_user_token_file()
+
+    if 'credentials' in st.session_state and st.session_state['credentials'] and st.session_state['credentials'].valid:
+        creds = st.session_state['credentials']
+        return creds
+
+    if os.path.exists(token_file):
+        try:
+            with open(token_file, "rb") as token:
+                creds = pickle.load(token)
+            st.session_state['credentials'] = creds
+        except Exception as e:
+            st.warning("トークンの読み込みに失敗しました。再認証が必要です。")
+
+    if not creds or not creds.valid:
+        # 必要に応じて再認証処理
+        pass
+
+    return creds
