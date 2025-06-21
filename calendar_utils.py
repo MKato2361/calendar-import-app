@@ -1,4 +1,5 @@
 import pickle
+import hashlib
 import os
 import streamlit as st
 from google_auth_oauthlib.flow import Flow
@@ -7,9 +8,11 @@ from googleapiclient.discovery import build
 from datetime import datetime, timedelta, timezone 
 
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
-TOKEN_FILE = "token.pickle" # 認証トークンを保存するファイル名
 
-
+    # 1. まず現在のセッションの認証情報がst.session_stateにあるか確認します
+    if 'credentials' in st.session_state and st.session_state['credentials'] and st.session_state['credentials'].valid:
+        creds = st.session_state['credentials']
+        return creds
 
     # 2. session_stateにない場合、token.pickleから永続化された認証情報を読み込もうとします
     if os.path.exists(TOKEN_FILE):
@@ -141,8 +144,6 @@ def delete_events_from_calendar(service, calendar_id, start_date: datetime, end_
         progress_bar.progress((i + 1) / total_events)
     
     return deleted_count
-
-import hashlib
 
 def get_user_token_file():
     user_info = st.session_state.get("user_id", st.session_state.get("run_id", str(datetime.now())))
